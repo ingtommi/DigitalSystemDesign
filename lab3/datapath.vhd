@@ -5,8 +5,8 @@ use IEEE.NUMERIC_STD.ALL;
 entity datapath is
   port (
     clk, rst : in std_logic;
-    image_num : in std_logic_vector(6 downto 0); -- 0 to 119
-    w1_en : in std_logic;
+    image_num : in std_logic_vector(6 downto 0); -- 0 to 119 max
+    w1_en, w1_rst : in std_logic;
     lay1_done, lay2_done : out std_logic
     );
 end datapath;
@@ -58,12 +58,13 @@ COMPONENT weights2
 END COMPONENT;
 
   -- ADDRESSES
-  signal image_curr : std_logic_vector(11 downto 0); -- 3840 depth
-  signal image_addr : std_logic_vector(11 downto 0); -- initial address
+  signal image_addr_temp : std_logic_vector(13 downto 0);
+  signal image_addr : std_logic_vector(11 downto 0); -- base address
   signal image_offs : std_logic_vector(4 downto 0) := (others => '0'); -- 32 rows
+  signal image_curr : std_logic_vector(11 downto 0); -- 3840 depth
   
   signal w1_addr : std_logic_vector(12 downto 0) := (others => '0'); -- 8192 depth
-  signal w2_addr : std_logic_vector(7 downto 0) := (others => '0'); -- 80 depth
+  signal w2_addr : std_logic_vector(6 downto 0) := (others => '0'); -- 80 depth
   
   -- MEMORY DATA
   signal im_row, w2_4 : std_logic_vector(31 downto 0);
@@ -74,64 +75,85 @@ END COMPONENT;
   signal sel_pixel : std_logic_vector(2 downto 0);
   
   signal mul1, mul2, mul3, mul4 : std_logic_vector(3 downto 0);
-  signal add1, add2 : signed(4 downto 0); -- TODO: check
-  signal add3 : signed(5 downto 0); -- TODO: check
+  signal add1, add2 : signed(4 downto 0);
+  signal add3 : signed(5 downto 0);
+  
+  type accum1_t is array(31 downto 0) of signed(13 downto 0);
+  signal accum1 : accum1_t; -- 14-bits
+  signal acc1_en : std_logic_vector(31 downto 0);
 
 begin
 
   -- image memory address generator
-  image_addr <= std_logic_vector(32 * unsigned(image_num)); -- initial address
+  -- TODO: check if correct
+  image_addr_temp <= std_logic_vector(32 * unsigned(image_num));
+  image_addr <= image_addr_temp(11 downto 0); -- base address
   image_curr <= std_logic_vector(unsigned(image_addr) + unsigned(image_offs)); -- current address
+  
+  -------------------------- LAYER 1 ------------------------
   
   -- w1 rows counter
   process(clk)
   begin
-    -- check reset
-    if rst = '1' then
+    -- check reset (must be set by C.U. the first time)
+    if w1_rst = '1' then
       w1_addr <= (others => '0');
     -- otherwise check clock
     elsif rising_edge(clk) then
       -- check enable
       if w1_en = '1' then
-        -- check max value (8191)
-        if w1_addr = "1111111111111" then
-          -- inform control unit
-          lay1_done <= '1';
-          -- reset address
-          w1_addr <= (others => '0');
-        -- otherwise
-        else
-          lay1_done <= '0';
-          -- increment address
-          w1_addr <= std_logic_vector(unsigned(w1_addr) + 1);
-        end if;
+        -- increment address
+        w1_addr <= std_logic_vector(unsigned(w1_addr) + 1);
       end if;
     end if;
-    sel_pixel <= w1_addr(2 downto 0);
-    image_offs <= w1_addr(7 downto 3);
   end process;
   
-  -- pixels mux
-  pixel <= im_row(31 downto 28) when (sel_pixel = "000") else -- [p1, p2, p3, p4]
-           im_row(27 downto 24) when (sel_pixel = "001") else
-           im_row(23 downto 20) when (sel_pixel = "010") else
-           im_row(19 downto 16) when (sel_pixel = "011") else
-           im_row(15 downto 12) when (sel_pixel = "100") else
-           im_row(11 downto 8) when (sel_pixel = "101") else
-           im_row(7 downto 4) when (sel_pixel = "110") else
-           im_row(3 downto 0);    
+   -- end of layer check
+  lay1_done <= '1' when w1_addr = "1111111111111" else
+               '0';
   
-  -- layer1
-  mul1 <= w1_4(15 downto 12) when pixel(3) = '0' else "0000"; -- w1 * p1
-  mul2 <= w1_4(11 downto 8) when pixel(2) = '0' else "0000"; -- w2 * p2
-  mul3 <= w1_4(7 downto 4) when pixel(1) = '0' else "0000"; -- w3 * p3
-  mul4 <= w1_4(3 downto 0) when pixel(0) = '0' else "0000"; -- w4 * p4
-  -- TODO: check
-  add1 <= signed(mul1) + signed(mul2);
-  add2 <= signed(mul3) + signed(mul4); 
-  add3 <= add1 + add2;
+  -- sub-signals from w1_addr
+  sel_pixel <= w1_addr(2 downto 0);
+  image_offs <= w1_addr(7 downto 3);
   
-  -- layer2
+  -- pixels selection
+  pixel <= im_row(3 downto 0) when (sel_pixel = "000") else -- [p1, p2, p3, p4]
+           im_row(7 downto 4) when (sel_pixel = "001") else
+           im_row(11 downto 8) when (sel_pixel = "010") else
+           im_row(15 downto 12) when (sel_pixel = "011") else
+           im_row(19 downto 16) when (sel_pixel = "100") else
+           im_row(23 downto 20) when (sel_pixel = "101") else
+           im_row(27 downto 24) when (sel_pixel = "110") else
+           im_row(31 downto 28);    
+ 
+  -- arithmetic
+  mul1 <= w1_4(3 downto 0) when pixel(0) = '1' else "0000"; -- w1 * p1
+  mul2 <= w1_4(7 downto 4) when pixel(1) = '1' else "0000"; -- w2 * p2
+  mul3 <= w1_4(11 downto 8) when pixel(2) = '1' else "0000"; -- w3 * p3
+  mul4 <= w1_4(15 downto 12) when pixel(3) = '1' else "0000"; -- w4 * p4
+  -- TODO: check if correct
+  add1 <= signed(mul1(3) & mul1) + signed(mul2(3) & mul2);
+  add2 <= signed(mul3(3) & mul3) + signed(mul4(3) & mul4); 
+  add3 <= (add1(4) & add1) + (add2(4) & add2);
+  
+  -- registers
+  -- TODO: design acc1_en
+  accum: for i in 0 to 31 generate
+    process(clk)
+    begin
+      if rst = '1' then
+        accum1(i) <= (others => '0');
+      elsif rising_edge(clk) then
+        if acc1_en(i) = '1' then
+          accum1(i) <= accum1(i) + add3;
+        end if;
+      end if;
+    end process;
+  end generate;
+  
+  -------------------------- LAYER 2 ------------------------
+  
+  -- implement ReLu directly when data is used
 
 instance_images : images_mem
   PORT MAP (
