@@ -33,26 +33,26 @@ process(clk)
     case currstate is 
         when init => 
             nextstate <= layer1;
-            w_enables <= "XX"; -- TODO: change
-            w_resets <= "XX"; -- TODO: change
+            w_enables <= "00"; -- TODO: change
+            w_resets <= "01"; -- TODO: change
             
         when layer1 =>
-            w_enables <= "XX"; -- TODO: change
-            w_resets <= "XX"; -- TODO: change
+            w_enables <= "01"; -- TODO: change
+            w_resets <= "10"; -- TODO: change
             if layer1_done = '1' then
                 nextstate <= layer2;
             end if;
             
         when layer2 =>
-            w_enables <= "XX"; -- TODO: change
-            w_resets <= "XX"; -- TODO: change
+            w_enables <= "01"; -- TODO: change
+            w_resets <= "00"; -- TODO: change
             if layer2_done = '1' then
                 nextstate <= finish;
             end if;
             
         when finish =>
-            w_enables <= "XX"; -- TODO: change
-            w_resets <= "XX"; -- TODO: change
+            w_enables <= "00"; -- TODO: change
+            w_resets <= "00"; -- TODO: change
             
       end case;
     end process;   

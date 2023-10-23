@@ -13,6 +13,7 @@ entity datapath is
 end datapath;
 
 architecture Behavioral of datapath is
+
 COMPONENT images_mem
   PORT (
     clka : IN STD_LOGIC;
@@ -75,6 +76,8 @@ END COMPONENT;
   signal pixel : std_logic_vector(3 downto 0); 
   signal sel_pixel : std_logic_vector(2 downto 0); -- selector
   
+  signal l1_done : std_logic;
+  
   -- MAC 4 layer 1
   signal mul1_l1, mul2_l1, mul3_l1, mul4_l1 : std_logic_vector(3 downto 0); 
   signal add1_l1, add2_l1 : signed(4 downto 0);
@@ -85,15 +88,15 @@ END COMPONENT;
   signal add1_l2, add2_l2 : signed(22 downto 0);
   signal add3_l2 : signed(23 downto 0);
   
-  type accum1_t is array(31 downto 0) of signed(13 downto 0); --matrix of neuron
-  signal accum1 : accum1_t; -- 14-bits
-  signal acc1_en : std_logic_vector(31 downto 0); --enable for the 32 neurons
+  type accum1_t is array(31 downto 0) of signed(13 downto 0); --matrix of neurons
+  signal accum1 : accum1_t; -- 14-bits signed
+  signal acc1_en : std_logic_vector(31 downto 0) := (0 => '1', others => '0'); --enable for the 32 neurons
   signal op_count : std_logic_vector(7 downto 0); -- 256 counter
 
 begin
 
   -- image memory address generator
-  -- TODO: check if correct
+  -- TODO: change with shift left
   image_addr_temp <= std_logic_vector(32 * unsigned(image_num));
   image_addr <= image_addr_temp(11 downto 0); -- base address (12 digit for 32x120 row)
   image_curr <= std_logic_vector(unsigned(image_addr) + unsigned(image_offs)); -- current address
@@ -101,7 +104,6 @@ begin
   -------------------------- LAYER 1 ------------------------
   
   -- w1 rows and operation counter
-  -- TODO: check if correct 'op_count' idea
   process(clk)
   begin
     -- check reset (must be set by C.U. the first time)
@@ -109,25 +111,26 @@ begin
       w1_addr <= (others => '0');
       op_count <= (others => '0');
     -- otherwise check clock
-    elsif rising_edge(clk) then     -- for every clock cycle, we update the w1_addres and the op count
-      -- check enable
-      if w1_en = '1' then
-        -- increment
-        w1_addr <= std_logic_vector(unsigned(w1_addr) + 1);
-        op_count <= std_logic_vector(unsigned(op_count) + 1);
+    elsif rising_edge(clk) then
+      -- check done
+      if l1_done = '0' then
+        -- check enable
+        if w1_en = '1' then
+          -- increment
+          w1_addr <= std_logic_vector(unsigned(w1_addr) + 1);
+          op_count <= std_logic_vector(unsigned(op_count) + 1);
+        end if;
       end if;
     end if;
   end process;
   
-   -- end of layer check (8191)
-   -- TODO: check if we should consider w1_addr = 0 (8192)
-  lay1_done <= '1' when w1_addr = "1111111111111" else
+  -- end of layer check (8191)
+  l1_done <= '1' when w1_addr = "1111111111111" else
                '0';
+  lay1_done <= l1_done;
   
-  -- end of neuron check (256)
-  -- TODO: check if correct idea            
-  acc1_en <= (0 => '1', others => '0') when op_count = "00000000" else  -- reset
-             acc1_en(30 downto 0) & '0' when op_count = "11111111" else -- shift left (every 256 clk cycle)
+  -- end of neuron check (256)         
+  acc1_en <= acc1_en(30 downto 0) & '0' when op_count = "11111111" else -- shift left (every 256 clk cycle)
              acc1_en;                                                   -- maintain
   
   -- sub-signals from w1_addr
@@ -187,14 +190,14 @@ begin
     end if;
   end process;
   
-   -- end of layer check (79)
-    -- TODO: check if we should consider w2_addr = 80
+  -- end of layer check (79)
+  -- TODO: check if we should consider w2_addr = 80
   lay2_done <= '1' when w2_addr = "1001111" else
                '0';
   
   -- arithmetic
   -- TODO: how to switch between accum(i)?
---  mul1_l2 <= signed(w2_4(7 downto 0)) * accum1(i) when accum1(0)(13) = '0' else (others => '0'); -- w2 * n1
+  --mul1_l2 <= signed(w2_4(7 downto 0)) * accum1(i) when accum1(0)(13) = '0' else (others => '0'); -- w2 * n1
 
 instance_images : images_mem
   PORT MAP (
