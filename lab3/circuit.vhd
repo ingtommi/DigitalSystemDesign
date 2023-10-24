@@ -2,14 +2,14 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 
 
-entity circuito is
+entity circuit is
     port(
     clk, rst: std_logic;
     image_num : in std_logic_vector(6 downto 0)
     );
-end circuito;
+end circuit;
 
-architecture Behavioral of circuito is
+architecture Behavioral of circuit is
 
     component control
     port(

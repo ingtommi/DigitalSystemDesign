@@ -27,7 +27,7 @@ process(clk)
     end if;
   end process;
   
-  process(currstate, rst)
+  process(currstate, rst, layer1_done)
   begin
     nextstate <= currstate;
     case currstate is 

@@ -60,7 +60,6 @@ COMPONENT weights2
 END COMPONENT;
 
   -- ADDRESSES
-  signal image_addr_temp : std_logic_vector(13 downto 0);
   signal image_addr : std_logic_vector(11 downto 0); -- base address
   signal image_offs : std_logic_vector(4 downto 0) := (others => '0'); -- 32 rows
   signal image_curr : std_logic_vector(11 downto 0); -- 3840 depth
@@ -72,11 +71,13 @@ END COMPONENT;
   signal im_row, w2_4 : std_logic_vector(31 downto 0);
   signal w1_4 : std_logic_vector(15 downto 0); --first row of weight file
   
-  -- OTHERS
+  -- PIXELS SELECTION
   signal pixel : std_logic_vector(3 downto 0); 
   signal sel_pixel : std_logic_vector(2 downto 0); -- selector
   
+  -- DONE SIGNALS
   signal l1_done : std_logic;
+  signal l2_done : std_logic;
   
   -- MAC 4 layer 1
   signal mul1_l1, mul2_l1, mul3_l1, mul4_l1 : std_logic_vector(3 downto 0); 
@@ -84,27 +85,29 @@ END COMPONENT;
   signal add3_l1 : signed(5 downto 0);
   
   -- MAC 4 layer 2
-  signal mul1_l2, mul2_l2, mul3_l3, mul4_l4 : signed(21 downto 0);
+  signal mul1_l2, mul2_l2, mul3_l2, mul4_l2 : signed(21 downto 0);
   signal add1_l2, add2_l2 : signed(22 downto 0);
   signal add3_l2 : signed(23 downto 0);
   
+  -- OTHERS
   type accum1_t is array(31 downto 0) of signed(13 downto 0); --matrix of neurons
   signal accum1 : accum1_t; -- 14-bits signed
   signal acc1_en : std_logic_vector(31 downto 0) := (0 => '1', others => '0'); --enable for the 32 neurons
-  signal op_count : std_logic_vector(7 downto 0); -- 256 counter
+  signal op_count : std_logic_vector(7 downto 0) := (others => '0'); -- 256 counter
+  type neurons_t is array(3 downto 0) of signed(13 downto 0);
+  signal neurons : neurons_t;
+  signal sel_neuron : std_logic_vector(2 downto 0);
 
 begin
 
   -- image memory address generator
-  -- TODO: change with shift left
-  image_addr_temp <= std_logic_vector(32 * unsigned(image_num));
-  image_addr <= image_addr_temp(11 downto 0); -- base address (12 digit for 32x120 row)
+  image_addr <= image_num & "00000" ; -- base address (12 digit for 32x120 row)
   image_curr <= std_logic_vector(unsigned(image_addr) + unsigned(image_offs)); -- current address
   
   -------------------------- LAYER 1 ------------------------
   
   -- w1 rows and operation counter
-  process(clk)
+  w1_counter: process(clk)
   begin
     -- check reset (must be set by C.U. the first time)
     if w1_rst = '1' then
@@ -126,13 +129,28 @@ begin
   
   -- end of layer check (8191)
   l1_done <= '1' when w1_addr = "1111111111111" else
-               '0';
-  lay1_done <= l1_done;
-  
-  -- end of neuron check (256)         
-  acc1_en <= acc1_en(30 downto 0) & '0' when op_count = "11111111" else -- shift left (every 256 clk cycle)
-             acc1_en;                                                   -- maintain
-  
+             '0';
+             
+  layer1_done : process(clk)
+  begin
+    if rising_edge(clk) then
+      if l1_done = '1' then
+        lay1_done <= '1';
+      else lay1_done <= '0';
+      end if;
+    end if;
+  end process;
+             
+  move_enable : process(clk)
+  begin
+    if rising_edge(clk) then
+      if op_count = "11111111" then
+        -- shift left
+        acc1_en <= acc1_en(30 downto 0) & '0';
+      end if;
+    end if;
+  end process;
+                        
   -- sub-signals from w1_addr
   sel_pixel <= w1_addr(2 downto 0); -- selector
   image_offs <= w1_addr(7 downto 3); -- offset row 0 to 31
@@ -152,9 +170,8 @@ begin
   mul2_l1 <= w1_4(7 downto 4) when pixel(1) = '1' else "0000"; -- w2 * p2
   mul3_l1 <= w1_4(11 downto 8) when pixel(2) = '1' else "0000"; -- w3 * p3
   mul4_l1 <= w1_4(15 downto 12) when pixel(3) = '1' else "0000"; -- w4 * p4
-  
-  -- TODO: check if correct padding
-  add1_l1 <= signed(mul1_l1(3) & mul1_l1) + signed(mul2_l1(3) & mul2_l1); --a sign-extended addition operation
+ 
+  add1_l1 <= signed(mul1_l1(3) & mul1_l1) + signed(mul2_l1(3) & mul2_l1); --sign-extended addition operation
   add2_l1 <= signed(mul3_l1(3) & mul3_l1) + signed(mul4_l1(3) & mul4_l1); 
   add3_l1 <= (add1_l1(4) & add1_l1) + (add2_l1(4) & add2_l1);
   
@@ -175,7 +192,7 @@ begin
   -------------------------- LAYER 2 ------------------------
   
   -- w2 rows counter
-  process(clk)
+  w2_counter : process(clk)
   begin
     -- check reset (must be set by C.U. the first time)
     if w2_rst = '1' then
@@ -191,13 +208,27 @@ begin
   end process;
   
   -- end of layer check (79)
-  -- TODO: check if we should consider w2_addr = 80
-  lay2_done <= '1' when w2_addr = "1001111" else
-               '0';
+  l2_done <= '1' when w2_addr = "1001111" else
+             '0';
+             
+  -- neuron selection
+  neurons <= accum1(3 downto 0) when (sel_neuron = "000") else
+             accum1(7 downto 4) when (sel_neuron = "001") else
+             accum1(11 downto 8) when (sel_neuron = "010") else
+             accum1(15 downto 12) when (sel_neuron = "011") else
+             accum1(19 downto 16) when (sel_neuron = "100") else
+             accum1(23 downto 20) when (sel_neuron = "101") else
+             accum1(27 downto 24) when (sel_neuron = "110") else
+             accum1(31 downto 28);
   
   -- arithmetic
-  -- TODO: how to switch between accum(i)?
-  --mul1_l2 <= signed(w2_4(7 downto 0)) * accum1(i) when accum1(0)(13) = '0' else (others => '0'); -- w2 * n1
+  mul1_l2 <= signed(w2_4(7 downto 0)) * neurons(0) when neurons(0)(13) = '0' else (others => '0'); -- w2 * n1
+  mul2_l2 <= signed(w2_4(15 downto 8)) * neurons(1) when neurons(1)(13) = '0' else (others => '0'); -- w2 * n2
+  mul3_l2 <= signed(w2_4(23 downto 16)) * neurons(2) when neurons(2)(13) = '0' else (others => '0'); -- w2 * n3
+  mul4_l4 <= signed(w2_4(31 downto 24)) * neurons(3) when neurons(3)(13) = '0' else (others => '0'); -- w2 * n4
+  add1_l2 <=
+  add2_l2 <=
+  add3_l2 <=
 
 instance_images : images_mem
   PORT MAP (

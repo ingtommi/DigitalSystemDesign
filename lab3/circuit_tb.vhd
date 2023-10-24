@@ -1,12 +1,12 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 
-entity circuito_tb is
-end circuito_tb;
+entity circuit_tb is
+end circuit_tb;
 
-architecture Behavioral of circuito_tb is
+architecture Behavioral of circuit_tb is
 
-    component circuito
+    component circuit
     port(
         clk, rst: std_logic;
         image_num : in std_logic_vector(6 downto 0)
@@ -27,7 +27,7 @@ architecture Behavioral of circuito_tb is
 begin
     
     -- Instantiate the Unit Under Test (UUT
-    uut: circuito port map(
+    uut: circuit port map(
         clk => clk,
         rst => rst,
         image_num => image_num
