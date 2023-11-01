@@ -5,8 +5,9 @@ entity control is
  port(
     clk, rst : in std_logic;
     layer1_done, layer2_done : in std_logic;
-    w_enables : out std_logic_vector(1 downto 0);
-    w_resets : out std_logic_vector(1 downto 0)
+    enables : out std_logic_vector(2 downto 0);
+    resets : out std_logic_vector(2 downto 0);
+    done : out std_logic
     );
 end control;
 
@@ -15,6 +16,8 @@ architecture Behavioral of control is
     signal currstate, nextstate: fsm_states;
 
 begin
+
+done <= layer2_done;
 
 process(clk)
   begin
@@ -27,32 +30,32 @@ process(clk)
     end if;
   end process;
   
-  process(currstate, rst, layer1_done)
+  process(currstate, rst, layer1_done, layer2_done)
   begin
     nextstate <= currstate;
     case currstate is 
         when init => 
             nextstate <= layer1;
-            w_enables <= "00"; -- TODO: change
-            w_resets <= "01"; -- TODO: change
+            enables <= "000";
+            resets <= "111";
             
         when layer1 =>
-            w_enables <= "01"; -- TODO: change
-            w_resets <= "10"; -- TODO: change
+            enables <= "001";
+            resets <= "110";
             if layer1_done = '1' then
                 nextstate <= layer2;
             end if;
             
         when layer2 =>
-            w_enables <= "01"; -- TODO: change
-            w_resets <= "00"; -- TODO: change
+            enables <= "010";
+            resets <= "100";
             if layer2_done = '1' then
                 nextstate <= finish;
             end if;
             
         when finish =>
-            w_enables <= "00"; -- TODO: change
-            w_resets <= "00"; -- TODO: change
+            enables <= "100";
+            resets <= "000";
             
       end case;
     end process;   
